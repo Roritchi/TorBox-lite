@@ -45,9 +45,6 @@ import click
 import sys
 import base64
 import requests
-import numpy as np
-import cv2 as cv
-from pytesseract import image_to_string
 
 
 def get_proxy(network=''):
@@ -72,132 +69,16 @@ def get_proxy(network=''):
     return proxy
 
 
-def get_challenge(proxy):
-    moat_fetch = "https://bridges.torproject.org/moat/fetch"
-    headers = {"Content-type": "application/vnd.api+json"}
-    data = {
-        "data": [{
-            "version": "0.1.0",
-            "type": "client-transports",
-            "supported": ["obfs4"],
-        }]
-    }
-
-    try:
-        r = requests.post(moat_fetch, json=data, proxies=proxy, headers=headers)
-        r = r.json()
-        r = r["data"][0]
-    except:
-        print(-1)
-        quit()
-    return r["image"], r["challenge"], r["transport"]
-
-
-def readb64(encoded_data):
-   nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
-   img = cv.imdecode(nparr, cv.IMREAD_COLOR)
-   return img
-
-
-def beat_captcha(image):
-    img = readb64(image)
-    ret, img = cv.threshold(img, 100, 255, cv.THRESH_BINARY)
-
-    kernel = np.ones((5, 5), np.uint8)
-    img = cv.morphologyEx(img, cv.MORPH_OPEN, kernel)
-
-    # Read chars from img
-    captcha_text = image_to_string(img,
-                                   config='-c tessedit_char_whitelist=' \
-                                          '0123456789' \
-                                          'ABCDEFGHIJKMNLOPKRSTUVWXYZ' \
-                                          'abcdefghijklmnopqrstuvwxyz')
-    captcha_text = captcha_text.strip()
-    return captcha_text
-
-
-def solve_challenge(captcha_text, challenge, transport, proxy):
-    moat_check = "https://bridges.torproject.org/moat/check"
-    headers = {"Content-type": "application/vnd.api+json"}
-    data = {
-        "data": [{
-            "id": "2",
-            "type": "moat-solution",
-            "version": "0.1.0",
-            "transport": transport,
-            "challenge": challenge,
-            "solution": captcha_text,
-            "qrcode": "false",
-        }]
-    }
-    r = requests.post(moat_check, json=data, proxies=proxy, headers=headers)
-    r = r.json()
-    if r.get('errors'):
-        return False
-    return r["data"][0]["bridges"]
-
 
 def get_bridges(network):
-    proxy = get_proxy(network)
     bridges = False
-    while not bridges:
-        captcha_img, challenge, transport = get_challenge(proxy)
-        captcha_text = beat_captcha(captcha_img)
-        bridges = solve_challenge(captcha_text, challenge, transport, proxy)
-
     return bridges
 
 
 def get_circumvention_bridges(country, network, snowflake):
-    proxy = get_proxy(network)
-    url = "https://bridges.torproject.org/moat/circumvention/settings"
-    headers = {"Content-type": "application/vnd.api+json"}
-    data = {"country": country}
+    return False
 
-    try:
-        r = requests.get(url, json=data, proxies=proxy, headers=headers)
-        r = r.json()
-        r = r["settings"]
-        if len(r):
-            if snowflake:
-                for i in r:
-                    bridge = i["bridges"]
-                    if bridge["type"] == "snowflake":
-                        return bridge["bridge_strings"]
-                print(-2)
-                sys.exit(1)
-            else:
-                for i in r:
-                    bridge = i["bridges"]
-                    if bridge["type"] == "obfs4" and bridge["source"] == "bridgedb":
-                        return bridge["bridge_strings"]
-            print(-2)
-            sys.exit(1)
-        else:
-            print(-2)
-            sys.exit(1)
-
-    except requests.exceptions.ConnectionError:
-        print(-1)
-        sys.exit(1)
-
-# fmt: off
-@click.command()
-@click.option('--network', '-n', default='', type=str, help="Force to get bridges over specific network. Example: -n <tor|inet>")
-@click.option('--country', '-c', default='', type=str, help="Circumvention country setting in lowercase")
-@click.option('--snowflake', is_flag=True, default=False, show_default=True, help="Get snowflake bridges instead of obfs4 (circumvention country need to be set)")
-# fmt: on
 def main(network, country, snowflake):
-    # Validate options
-    if country:
-        if len(country) > 2:
-            print("[X] Invalid country")
-            sys.exit(1)
-    if snowflake:
-        if country == '':
-            print("[x] Country must be set")
-            sys.exit(1)
-
     # If country is set get circumvention bridges
     if country:
         bridges = get_circumvention_bridges(country=country, network=network, snowflake=snowflake)
